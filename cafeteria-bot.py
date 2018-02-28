@@ -2,12 +2,14 @@
 import requests
 import goslate
 import urllib
-from bs4 import BeautifulSoup
 import sys
+import datetime
 
 gs = goslate.Goslate()
-url_golm = "http://www.studentenwerk-potsdam.de/mensa-golm.html"
-url_gsee = "http://www.studentenwerk-potsdam.de/de/mensa-griebnitzsee.html"
+
+openmensa = "https://openmensa.org/api/v2"
+openmensa_golm = openmensa + "/canteens/61/days/{}".format(datetime.date.today())
+openmensa_gsee = openmensa + "/canteens/62/days/{}".format(datetime.date.today())
 
 # if you register a bot at the Slack API, you get a 'secret' URL to send
 # the POST requests to. The name of the bot, the channel and the icon
@@ -15,43 +17,34 @@ url_gsee = "http://www.studentenwerk-potsdam.de/de/mensa-griebnitzsee.html"
 # post that is send to the URL.
 url_post = "https://hooks.slack.com/services/X/Y/Z"
 
-def clean(text):
-    """
-    Remove stuff that could be in the text.
-    """
-    new = text.replace("\r", "")
-    new = new.replace("\t", "")
-    new = new.replace("\n", "")
-    new = new.replace("- ", "-")
-    new = new.replace("  ", " ")
-    return new
 
 def create_menu_text(list_of_items):
     """
     Create the actual text of a post.
     list_of_items: list of the menu item texts.
     """
-    ret = ""
-    for item in list_of_items:
-        item = clean(item)
-        ret += item + "\n"
-        # translate = gs.translate(item, 'en', 'de')
-        # ret += "_" + translate.replace(" , ", ", ") + "_\n"
-        # ret += "\n"
-    return ret[:-1] # ignore last newline
+    def translate_maybe(txt, lang):
+        try:
+            return gs.translate(txt, lang)
+        except Exception:
+            return txt
+
+    def create_str_item(item):
+        return "{}: {} ({})".format(
+            item.get("category").replace("Angebot ", "N°"),
+            translate_maybe(item.get("name"), "en"),
+            ",".join(item.get("notes"))
+        )
+    ret = "\n".join(map(create_str_item, list_of_items))
+    return ret
+
 
 def check_page(url):
-    page = BeautifulSoup(urllib.urlopen(url).read(), "html.parser")
-    items = []
-    try:
-        # get all four menu options
-        items.append(page.find("td", attrs={"class": "text1"}).get_text().strip())
-        items.append(page.find("td", attrs={"class": "text2"}).get_text().strip())
-        items.append(page.find("td", attrs={"class": "text3"}).get_text().strip())
-        items.append(page.find("td", attrs={"class": "text4"}).get_text().strip())
-    except Exception, e:
+    if requests.get(url).json().get("closed", False):
         return []
-    return items
+    else:
+        return requests.get(url + "/meals").json()
+
 
 def post(location, items):
     if len(items) > 0:
@@ -62,6 +55,7 @@ def post(location, items):
         return True
     return False
 
-if post("Golm", check_page(url_golm)) and post("Griebnitzsee", check_page(url_gsee)):
+
+if post("Golm", check_page(openmensa_golm)) and post("Gsee", check_page(openmensa_gsee)):
     sys.exit(0)
 sys.exit(-1)
